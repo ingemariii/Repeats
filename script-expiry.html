@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Script expiry and repeats calculator</title>
+<style>
+:root{--bg:#f3f6f4;--surface:#fff;--ink:#17302b;--muted:#5c726c;--line:#cfdcd7;--accent:#0e6b5c;--warn:#a4540c;--bad:#a12b2b;--ok:#0e6b5c;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1c19;--surface:#172a26;--ink:#e6f1ed;--muted:#9bb3ac;--line:#2b423c;--accent:#4cc3ad;--warn:#e8a050;--bad:#ef8585;--ok:#4cc3ad}}
+:root[data-theme="dark"]{--bg:#0f1c19;--surface:#172a26;--ink:#e6f1ed;--muted:#9bb3ac;--line:#2b423c;--accent:#4cc3ad;--warn:#e8a050;--bad:#ef8585;--ok:#4cc3ad}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,-apple-system,sans-serif;line-height:1.45}
+main{max-width:480px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.35rem;margin:0 0 4px}
+p.sub{margin:0 0 18px;color:var(--muted);font-size:.92rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+label{display:block;font-weight:600;font-size:.9rem;margin-bottom:6px}
+input{width:100%;font:inherit;font-size:1.05rem;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+input:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+input[type=date]{min-width:0;max-width:100%;-webkit-appearance:none;appearance:none;min-height:46px;text-align:left}
+button{font:inherit;font-weight:600;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.result{font-size:1.9rem;font-weight:700;margin:2px 0 4px}
+.status{font-weight:600}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.note{color:var(--muted);font-size:.88rem;margin:4px 0}
+.calc{font-variant-numeric:tabular-nums;font-size:.92rem;margin:10px 0 0;padding-top:10px;border-top:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:.92rem;font-variant-numeric:tabular-nums}
+td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600}
+.scroll{overflow-x:auto}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.seg button{padding:10px 4px}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.big{font-size:2.4rem;font-weight:700;margin:2px 0}
+.trace{margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--line);font-size:.88rem;font-variant-numeric:tabular-nums;color:var(--muted)}
+.trace div{padding:2px 0}.trace .hit{color:var(--ok);font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>Script calculator</h1>
+<p class="sub">Step 1 works out the expiry. Step 2 uses it to work out the repeats to supply.</p>
+
+<div class="card">
+  <label style="font-size:1rem">1. Expiry date</label>
+  <p class="note" style="margin:0 0 10px">Rx date + (28 × Y) + (2 × Y) days. Weekends move back to Friday.</p>
+  <div class="row">
+    <div><label for="rx">Rx date (X)</label><input id="rx" type="date"></div>
+    <div><label for="rep">Repeats (Y)</label><input id="rep" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 6"></div>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="primary" id="today">Rx date = today</button>
+    <button id="clear">Clear</button>
+  </div>
+</div>
+
+<div class="card" id="out" hidden>
+  <div class="note">Script expires</div>
+  <div class="result" id="exp"></div>
+  <div class="status" id="stat"></div>
+  <div class="note" id="adj"></div>
+  <div class="calc" id="calc"></div>
+</div>
+
+<div class="card">
+  <label style="font-size:1rem">2. Repeats to supply</label>
+  <p class="note" style="margin:0 0 10px">Uses the expiry from step 1: <b id="usedExp">not set yet</b></p>
+  <label for="ncd">NCD (next date facility receives meds)</label>
+  <input id="ncd" type="date">
+  <label style="margin-top:12px">Facility supply</label>
+  <div class="seg" id="seg">
+    <button type="button" data-v="single" aria-pressed="true">Single</button>
+    <button type="button" data-v="double" aria-pressed="false">Double</button>
+    <button type="button" data-v="triple" aria-pressed="false">Triple</button>
+  </div>
+  <label for="ovr" style="margin-top:12px">Overall repeats (Y)</label>
+  <input id="ovr" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 6">
+  <label style="margin-top:14px;display:flex;align-items:center;gap:10px"><input id="iss" type="checkbox" style="width:20px;height:20px;padding:0;margin:0"> Has medication been issued?</label>
+  <div id="res2" hidden style="margin-top:14px">
+    <div class="note">Script to supply</div>
+    <div class="big" id="ans"></div>
+    <div class="note" id="ansNote"></div>
+    <div class="trace" id="trace"></div>
+  </div>
+</div>
+
+<div class="card" id="schedCard" hidden>
+  <label>Repeat dates at 28-day intervals</label>
+  <div class="scroll"><table><thead><tr><th>Fill</th><th>Date</th></tr></thead><tbody id="sched"></tbody></table></div>
+  <p class="note">Fill 0 is the original dispense. Intervals are 28 days from the rx date.</p>
+</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let expDate=null,supply="single";
+try{const sv=localStorage.getItem("expIso");if(sv)expDate=parse(sv)}catch(e){}
+const DAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function parse(s){const[a,b,c]=s.split("-").map(Number);return new Date(Date.UTC(a,b-1,c))}
+function add(d,n){return new Date(d.getTime()+n*864e5)}
+function fmt(d){return DAYS[d.getUTCDay()]+" "+d.getUTCDate()+" "+MONTHS[d.getUTCMonth()]+" "+d.getUTCFullYear()}
+function iso(d){return d.toISOString().slice(0,10)}
+function run(){
+  const rx=$("rx").value,r=$("rep").value;
+  if(!rx||r===""||Number(r)<0||!Number.isInteger(Number(r))){$("out").hidden=true;$("schedCard").hidden=true;run2();return}
+  const Y=Number(r),X=parse(rx),total=28*Y+2*Y;
+  let e=add(X,total),moved=0;
+  const dow=e.getUTCDay();
+  if(dow===6)moved=1;else if(dow===0)moved=2;
+  const raw=e;if(moved)e=add(e,-moved);
+  expDate=e;try{localStorage.setItem("expIso",iso(e))}catch(x){}
+  $("exp").textContent=fmt(e);
+  $("adj").textContent=moved?("Calculated date was "+fmt(raw)+", moved back "+moved+" day"+(moved>1?"s":"")+" to Friday."):"";
+  $("calc").innerHTML="(28 × "+Y+") + (2 × "+Y+") = <b>"+total+" days</b> after "+fmt(X);
+  const now=new Date();const t=new Date(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()));
+  const left=Math.round((e-t)/864e5);const s=$("stat");
+  if(left<0){s.className="status bad";s.textContent="Expired "+(-left)+" day"+(left===-1?"":"s")+" ago"}
+  else if(left===0){s.className="status warn";s.textContent="Expires today"}
+  else{s.className="status "+(left<=14?"warn":"ok");s.textContent=left+" day"+(left===1?"":"s")+" remaining"}
+  $("out").hidden=false;
+  let h="";for(let i=0;i<=Y&&i<=60;i++)h+="<tr><td>"+i+"</td><td>"+fmt(add(X,28*i))+"</td></tr>";
+  $("sched").innerHTML=h;$("schedCard").hidden=false;run2();
+}
+$("rx").addEventListener("input",run);$("rep").addEventListener("input",()=>{$("ovr").value=$("rep").value;run()});
+$("today").onclick=()=>{const n=new Date();$("rx").value=iso(new Date(Date.UTC(n.getFullYear(),n.getMonth(),n.getDate())));run()};
+$("clear").onclick=()=>{$("rx").value="";$("rep").value="";expDate=null;try{localStorage.removeItem("expIso")}catch(x){}run()};
+const RULES={single:Array.from({length:60},(_,i)=>({k:i+1,l:i+1})),double:[{k:0,l:1},{k:2,l:1},{k:4,l:3},{lt:56,l:5}],triple:[{ge:168,l:1},{lt:84,l:4}]};
+function run2(){
+  $("usedExp").textContent=expDate?fmt(expDate):"not set yet";
+  const n=$("ncd").value,y=$("ovr").value,D=$("iss").checked?1:0;
+  if(!expDate||!n||y===""||Number(y)<0||!Number.isInteger(Number(y))){$("res2").hidden=true;return}
+  const Y=Number(y),N=parse(n);let ans=null,html="";
+  const days=Math.round((expDate-N)/864e5);
+  for(const r of RULES[supply]){
+    let ok,line;
+    if(r.k!==undefined){
+      if(Y-r.k<0)continue;
+      const d=add(N,(Y-r.k)*28);ok=d<expDate;
+      line="NCD + ("+Y+(r.k?" − "+r.k:"")+") × 28 = "+fmt(d)+(ok?" → before expiry":" → not before expiry");
+    }else if(r.ge!==undefined){ok=days>=r.ge;line="NCD is "+days+" days before expiry (needs "+r.ge+" or more)"}
+    else{ok=days>=0&&days<r.lt;line="NCD is "+days+" days before expiry (needs less than "+r.lt+")"}
+    html+="<div"+(ok?' class="hit"':"")+">"+line+"</div>";
+    if(ok){ans=r.l+"/"+Y;break}
+  }
+  const rxv=$("rx").value;
+  if(D&&rxv&&days>0){
+    const fromRx=Math.round((N-parse(rxv))/864e5),T={single:40,double:68,triple:96}[supply],L={single:2,double:3,triple:4}[supply];
+    if(fromRx<T){ans=L+"/"+Y;html+='<div class="hit">Issued: NCD is '+fromRx+' days from rx date (under '+T+') → '+ans+'</div>'}
+    else html+='<div>Issued: NCD is '+fromRx+' days from rx date ('+T+' or more) → follows the NCD calculation</div>';
+  }else if(D&&!rxv)html+='<div>Issued is ticked: enter the rx date in step 1 to apply that rule</div>';
+  $("ans").textContent=ans||(days<=0?"Expired":"No fit");
+  $("ansNote").textContent=ans?"":(days<=0?"The NCD is on or after the expiry date, so no delivery can take place.":"None of the checks land before expiry. Check this script manually.");
+  $("trace").innerHTML=html;$("res2").hidden=false;
+}
+document.querySelectorAll("#seg button").forEach(b=>b.onclick=()=>{supply=b.dataset.v;document.querySelectorAll("#seg button").forEach(x=>x.setAttribute("aria-pressed",x===b));run2()});
+$("ncd").addEventListener("input",run2);$("ovr").addEventListener("input",run2);$("iss").addEventListener("change",run2);
+$("rep").addEventListener("input",()=>{$("ovr").value=$("rep").value;run2()});
+run2();
+</script>
+</body>
+</html>
